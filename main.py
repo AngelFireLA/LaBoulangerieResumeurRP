@@ -11,12 +11,12 @@ gemini_api_key = os.getenv('GEMINI_API_KEY')
 genai.configure(api_key=gemini_api_key)
 
 
-def generate_response(user_input, system_instruction, model="gemini-1.5-pro-002", generation_config=None,
+def generate_response(user_input, system_instruction, model="gemini-2.5-pro-exp-03-25", generation_config=None,
                       safety_settings=None):
+    print("generating response")
     if not generation_config:
         generation_config = {
             "temperature": 0.5,
-            "max_output_tokens": 32000,
         }
     if not safety_settings:
         safety_settings = [
@@ -45,6 +45,7 @@ def generate_response(user_input, system_instruction, model="gemini-1.5-pro-002"
     convo = model.start_chat(history=[
     ])
     convo.send_message(user_input)
+    print(convo.last.text)
     return convo.last.text
 
 
@@ -95,8 +96,10 @@ first_day = datetime(2022, 9, 1)
 # Gaiartian months
 months = ["Gaiarkhè", "Tempopidum", "Quinésil", "Éposendre"]
 
-hours_to_summarize = int(os.getenv('HOURS_OF_CONTEXT'))
-context_hours = int(os.getenv('HOURS_TO_SUMMARIZE').strip())
+hours_to_summarize = int(os.getenv('HOURS_TO_SUMMARIZE'))
+context_hours = int(os.getenv('HOURS_OF_CONTEXT'))
+starting_hour = int(os.getenv('STARTING_HOUR'))
+
 
 def calculate_gaiartian_date(input_date: str):
     """Convert real-world date into custom Gaiartian date format."""
@@ -139,14 +142,16 @@ class MyClient(discord.Client):
                     summary = await self.journal(message)
 
     async def get_messages_since_last_x_hours(self, channel_id, hours):
-        """Fetch and return all messages in a specific channel from the last X hours."""
+        """Fetch and return all messages in a specific channel from the last X hours, excluding messages newer than starting_hour."""
         channel = self.get_channel(channel_id)
         if not channel:
             print(f"Channel with ID {channel_id} not found.")
             return []
 
-        # Calculate the time threshold (X hours ago) and make it timezone-aware in UTC
-        time_threshold = datetime.now(timezone.utc) - timedelta(hours=hours)
+        # Calculate the time thresholds and make them timezone-aware in UTC
+        now = datetime.now(timezone.utc)
+        time_threshold = now - timedelta(hours=hours)
+        start_time_threshold = now - timedelta(hours=starting_hour)
 
         # List to store messages (raw)
         all_messages = []
@@ -155,13 +160,14 @@ class MyClient(discord.Client):
         async for message in channel.history(limit=None):  # limit=None fetches all available messages
             if message.created_at < time_threshold:
                 break
+            if message.created_at > start_time_threshold:
+                continue
             all_messages.append(message)
 
         # Reverse the list to make it from oldest to newest
         all_messages.reverse()
 
         return all_messages
-
     async def format_message(self, message):
         """Format a single message with username, Gaiartian date, and content, replacing mentions."""
         content = message.content
@@ -584,11 +590,14 @@ class MyClient(discord.Client):
     * jour mois, NONE
 
     Voilà au boulot, dans ta réponse donne seulement ta réponse formattée sans commentaires additionnels.
-    Je rappelle, ta réponse doit être en français, et résumer uniquement les jours à résumer, et pas ceux en contexte.
+    Je rappelle, ta réponse doit être en français, et résumer uniquement les jours à résumer, et pas ceux en contexte. Mais fait bien un résumé de TOUT. Je veux pas une réponse courte. je ne veux rien d'autres dans le message que ta réponse formattée. (pas de commentaires))
         """
         print(system_message)
         async with message.channel.typing():
             try:
+                #dump system message to file
+                with open("system_message.txt", "w", encoding="utf-8") as f:
+                    f.write(system_message)
                 response = generate_response("Procède.", system_message)
                 print(response)
                 if len(response) > 2000:
@@ -1053,7 +1062,7 @@ Voilà une aide pour la forme et le style d'un journal :
   - Présenter les informations de manière impartiale.
   - Éviter les jugements de valeur ou les biais personnels.
 
-Voilà à toi de jouer monsieur le présentateur
+Voilà à toi de jouer monsieur le présentateur.
 """
         print(system_message)
         async with message.channel.typing():
@@ -1070,16 +1079,7 @@ Voilà à toi de jouer monsieur le présentateur
                 await message.channel.send(f"Error: {e}")
 
 
-
-
-
-
-
-
-
 client = MyClient()
 
 # Run the client using the token
 client.run(TOKEN)  # bot=False means it runs as a user account
-
-print("hello")
